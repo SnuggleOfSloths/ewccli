@@ -205,3 +205,78 @@ def test_dry_run_skips_everything(local_repo, tmp_path):
     assert rc == 0
     assert "Dry run" in msg
     assert not (out / "itemrepo").exists()
+
+
+@pytest.mark.parametrize("field", ["source", "ref", "output"])
+def test_catalog_values_are_not_shell_commands(local_repo, tmp_path, field):
+    """Exercise real Git with shell metacharacters in catalog values and paths."""
+    payload = "itemrepo';touch INJECTED;echo '"
+    source = local_repo
+    ref = "1.0.0"
+    out = tmp_path / "out"
+    if field == "source":
+        source = local_repo.rename(tmp_path / payload)
+    elif field == "ref":
+        ref = payload
+    else:
+        out = tmp_path / payload
+
+    rc, msg = git_clone_item(
+        source=f"file://{source}",
+        repo_name="itemrepo",
+        command_path=str(out),
+        ref=ref,
+    )
+
+    assert not list(tmp_path.rglob("INJECTED"))
+    if field == "ref":
+        assert rc != 0
+    else:
+        assert rc == 0, msg
+        assert _content(out) == "v1"
+
+
+def test_option_ref_rejected_before_force_delete(local_repo, tmp_path):
+    """A revision cannot become a Git option or trigger deletion first."""
+    out = tmp_path / "out"
+    repo = out / "itemrepo"
+    repo.mkdir(parents=True)
+    marker = repo / "keep"
+    marker.touch()
+    rc, _ = git_clone_item(
+        source=f"file://{local_repo}",
+        repo_name="itemrepo",
+        command_path=str(out),
+        ref="--output=INJECTED",
+        force=True,
+    )
+    assert rc != 0
+    assert marker.exists()
+
+
+def test_requirements_path_is_one_literal_argument(tmp_path, monkeypatch):
+    """Run a stand-in Galaxy executable to observe the actual process arguments."""
+    import json
+    import os
+    import sys
+
+    from ewccli.backends.ansible.backend_ansible import AnsibleBackend
+
+    galaxy = tmp_path / "ansible-galaxy"
+    galaxy.write_text(
+        f"#!{sys.executable}\nimport json, sys\nprint(json.dumps(sys.argv[1:]))\n"
+    )
+    galaxy.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.chdir(tmp_path)
+    requirements = "requirements with spaces;touch INJECTED;#.yml"
+    rc, message = AnsibleBackend().install_ansible_roles(requirements)
+    assert rc == 0, message
+    assert json.loads(message.split("\n", 1)[1]) == [
+        "role",
+        "install",
+        "-r",
+        requirements,
+        "--force",
+    ]
+    assert not (tmp_path / "INJECTED").exists()
