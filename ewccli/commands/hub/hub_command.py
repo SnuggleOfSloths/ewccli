@@ -8,6 +8,7 @@
 
 """CLI EWC Hub: EWC Hub interaction."""
 
+import ast
 import os
 import sys
 import yaml
@@ -165,7 +166,81 @@ def check_missing_required_inputs(
     return missing_keys
 
 
-def validate_item_input_types(  # noqa: CCR001
+_CATALOG_TYPES: Dict[str, Any] = {
+    "str": str,
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "bytes": bytes,
+    "list": list,
+    "dict": dict,
+    "tuple": tuple,
+    "set": set,
+    "frozenset": frozenset,
+    "Any": Any,
+    "List": typing.List,
+    "Dict": typing.Dict,
+    "Tuple": typing.Tuple,
+    "Set": typing.Set,
+    "FrozenSet": typing.FrozenSet,
+    "Optional": typing.Optional,
+    "Union": typing.Union,
+}
+_CATALOG_GENERICS = {
+    "list",
+    "dict",
+    "tuple",
+    "set",
+    "frozenset",
+    "List",
+    "Dict",
+    "Tuple",
+    "Set",
+    "FrozenSet",
+    "Optional",
+    "Union",
+}
+
+
+def _parse_catalog_type(type_expr: str) -> Any:  # noqa: CCR001, CFQ004
+    """Resolve a type declaration without executing catalog code.
+
+    Only named types, generic parameters and unions are accepted. Quoted
+    forward references are excluded because Pydantic can evaluate them.
+    """
+
+    def resolve(node: ast.AST) -> Any:  # noqa: CCR001, CFQ004
+        if isinstance(node, ast.Name) and node.id in _CATALOG_TYPES:
+            return _CATALOG_TYPES[node.id]
+        if isinstance(node, ast.Constant) and node.value is None:
+            return type(None)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            return typing.Union[resolve(node.left), resolve(node.right)]
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in _CATALOG_GENERICS
+        ):
+            nodes = (
+                node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+            )
+            args = tuple(
+                (
+                    Ellipsis
+                    if isinstance(arg, ast.Constant) and arg.value is Ellipsis
+                    else resolve(arg)
+                )
+                for arg in nodes
+            )
+            return _CATALOG_TYPES[node.value.id][args[0] if len(args) == 1 else args]
+        raise ValueError("Unsupported catalog type declaration")
+
+    if not isinstance(type_expr, str):
+        raise ValueError("Catalog types must be strings")
+    return resolve(ast.parse(type_expr.strip(), mode="eval").body)
+
+
+def validate_item_input_types(  # noqa: CCR001, CFQ004
     parsed_inputs: Optional[Dict[str, str]],
     item_info_input_spec: Optional[List[Dict[str, str]]],
 ) -> str:
@@ -186,10 +261,6 @@ def validate_item_input_types(  # noqa: CCR001
     if not item_info_input_spec or not parsed_inputs:
         return ""
 
-    # # Prepare safe globals with all typing names
-    safe_globals = {k: getattr(typing, k) for k in dir(typing) if not k.startswith("_")}
-    safe_globals.update({"Any": Any})  # Add Any from builtins
-
     # Build a dict of pydantic fields: { field_name: (python_type, required) }
     fields = {}
     expected_types_map = {}  # Keep original type strings for error messages
@@ -200,14 +271,17 @@ def validate_item_input_types(  # noqa: CCR001
         expected_types_map[name] = type_expr  # Save for later display
 
         try:
-            py_type = eval(type_expr, safe_globals)
-        except Exception:
-            py_type = Any
+            py_type = _parse_catalog_type(type_expr)
+        except (ValueError, TypeError, SyntaxError, RecursionError):
+            return f"Invalid catalog type for {name}: {type_expr}"
 
         fields[name] = (py_type, ...)  # ... = required field
 
     # Create a dynamic Pydantic model
-    dinamic_inputs = create_model("DynamicInputs", **fields)
+    try:
+        dinamic_inputs = create_model("DynamicInputs", **fields)
+    except (TypeError, ValueError):
+        return "Invalid catalog input type schema"
 
     try:
         dinamic_inputs(**parsed_inputs)

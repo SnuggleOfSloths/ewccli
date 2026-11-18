@@ -398,3 +398,69 @@ def test_categorize_item_inputs_does_not_mutate_deploy_params():
     # The deploy subcommand's params must be untouched as well.
     deploy = next(p for p in ewc_hub_command.commands["deploy"].params)
     assert deploy.name == "extra_volume"
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "__import__('pathlib').Path({marker!r}).touch() or str",
+        "str if __import__('pathlib').Path({marker!r}).touch() else int",
+        "List[\"__import__('pathlib').Path({marker!r}).touch() or str\"]",
+        "str.__class__",
+        "[str][0]",
+        "UnknownType",
+        "List[",
+        "Optional[int, str]",
+        "int[str]",
+    ],
+)
+def test_catalog_type_expressions_are_rejected_without_execution(tmp_path, expression):
+    marker = tmp_path / "executed"
+    schema = [{"name": "foo", "type": expression.format(marker=str(marker))}]
+
+    result = validate_item_input_types({"foo": "value"}, schema)
+
+    assert result
+    assert "catalog" in result
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize(
+    "type_expr,value",
+    [
+        ("str", "text"),
+        ("int", 3),
+        ("float", 1.5),
+        ("bool", True),
+        ("Any", {"x": 1}),
+        ("List[str]", ["a"]),
+        ("Optional[List[str]]", None),
+        ("Union[str, int]", 2),
+        ("Dict[str, List[int]]", {"a": [1]}),
+        ("list[dict[str, int]]", [{"a": 1}]),
+        ("Tuple[int, str]", (1, "a")),
+        ("Tuple[int, ...]", (1, 2)),
+        ("Set[int]", {1}),
+        ("FrozenSet[str]", frozenset({"a"})),
+        ("str | None", None),
+        ("str | int", 1),
+    ],
+)
+def test_supported_catalog_type_declarations(type_expr, value):
+    schema = [{"name": "foo", "type": type_expr}]
+    assert validate_item_input_types({"foo": value}, schema) == ""
+
+
+@pytest.mark.parametrize(
+    "type_expr,value",
+    [
+        ("Union[str, int]", []),
+        ("Dict[str, List[int]]", {"a": ["bad"]}),
+        ("list[dict[str, int]]", [{"a": "bad"}]),
+        ("Tuple[int, ...]", ("bad",)),
+        ("str | None", []),
+    ],
+)
+def test_supported_catalog_types_still_enforce_validation(type_expr, value):
+    schema = [{"name": "foo", "type": type_expr}]
+    assert "expected type" in validate_item_input_types({"foo": value}, schema)
