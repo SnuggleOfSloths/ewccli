@@ -9,6 +9,7 @@
 """Ansible backend methods."""
 
 import os
+import shlex
 import shutil
 from typing import List, Optional, Tuple, Dict, Any
 
@@ -79,16 +80,13 @@ class AnsibleBackend:
         )
         args_path = os.path.join(working_directory_path, "args")
 
-        command = ""
-
-        # if env:
-        #     bash_env_line = " ".join(f"{k}={v}" for k, v in env.items())
-        #     command += bash_env_line + " "
-
-        command += " ".join(cmdline)
-
+        command_args = list(cmdline)
         if extra_vars:
-            command += " --extra-vars " + "'" + extra_vars + "'"
+            command_args.extend(["--extra-vars", extra_vars])
+
+        # Runner parses the args file with shlex.split; preserve each argument,
+        # including JSON containing apostrophes and paths containing spaces.
+        command = shlex.join(command_args)
 
         if not os.path.exists(args_path):
             with open(args_path, "w") as f:
