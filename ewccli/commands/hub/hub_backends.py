@@ -176,12 +176,11 @@ def _clone_repository(
     _LOGGER.info(
         f"⬇️ Starting to clone the repository '{repo_name}' into {command_path}..."
     )
-    git_command = [
-        f"""[ -d "$(basename '{source}' .git)/.git" ] || git clone '{source}' """
-    ]
+    git_command = ["git", "clone", "--", source, str(repo_path.resolve())]
     return run_command_from_host(
         description="git clone repository",
         command=git_command,
+        shell=False,
         cwd=command_path,
         dry_run=dry_run,
     )
@@ -200,16 +199,22 @@ def _checkout_ref(
     """
     _LOGGER.info(f"🔒 Checking out ref '{ref}' for repository '{repo_name}'...")
 
-    checkout_command = [
-        f"git -C '{repo_path}' fetch --tags --force origin && "
-        f"git -C '{repo_path}' checkout --force '{ref}'"
-    ]
+    git_command = ["git", "-C", str(repo_path.resolve())]
     return_code, message = run_command_from_host(
-        description=f"git checkout ref {ref}",
-        command=checkout_command,
+        description="git fetch repository",
+        command=git_command + ["fetch", "--tags", "--force", "origin"],
         cwd=command_path,
         dry_run=dry_run,
+        shell=False,
     )
+    if return_code == 0:
+        return_code, message = run_command_from_host(
+            description=f"git checkout ref {ref}",
+            command=git_command + ["checkout", "--force", ref, "--"],
+            cwd=command_path,
+            dry_run=dry_run,
+            shell=False,
+        )
 
     if return_code != 0:
         return (
@@ -222,7 +227,7 @@ def _checkout_ref(
     return 0, f"🔒 Checked out ref '{ref}' for repository '{repo_name}'."
 
 
-def git_clone_item(
+def git_clone_item(  # noqa: CCR001
     source: str,
     repo_name: str,
     command_path: str,
@@ -248,6 +253,9 @@ def git_clone_item(
     ########################################################################
     if dry_run:
         return 0, "Dry run: skipping git clone..."
+
+    if ref and (ref.startswith("-") or "\x00" in ref):
+        return 1, "Invalid Git ref: expected a tag, branch or commit."
 
     _LOGGER.info("Git clone item...")
     ########################################################################

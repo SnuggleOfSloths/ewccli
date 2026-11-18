@@ -30,15 +30,16 @@ def generate_random_id(length: int = 10) -> str:
     return f"{date_part}-{random_part}"
 
 
-def run_command_from_host(
+def run_command_from_host(  # noqa: CFQ002
     description: str,
     command: List[str],
     timeout: Optional[int] = None,
     cwd: Optional[str] = None,
     env: Optional[dict[str, str]] = None,
     dry_run: bool = False,
+    shell: bool = True,
 ) -> Tuple[int, str]:
-    """Run command with subprocess."""
+    """Run a command; use shell=False with an argument list for untrusted inputs."""
     _LOGGER.debug(
         '"%s" -> exec command "%s" with timeout %s', description, command, timeout
     )
@@ -51,7 +52,7 @@ def run_command_from_host(
             command,
             capture_output=True,
             text=True,  # The output is decoded to a string
-            shell=True,
+            shell=shell,
             check=True,  # raise CalledProcessError if non-zero exit code
             cwd=cwd,
             env=env,
