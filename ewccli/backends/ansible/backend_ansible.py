@@ -141,13 +141,20 @@ class AnsibleBackend:
         self, requirements_path: str, dry_run: bool = False
     ) -> Tuple[int, str]:
         """Install Ansible roles."""
-        command = f"ansible-galaxy role install -r {requirements_path} --force"
+        command = [
+            "ansible-galaxy",
+            "role",
+            "install",
+            "-r",
+            requirements_path,
+            "--force",
+        ]
         _LOGGER.info(f"Installing ansible roles from requirements: \n{command}\n")
         return_code, message = run_command_from_host(
             description="Install ansible roles",
-            command=[command],
+            command=command,
+            shell=False,
             timeout=None,
-            # cwd=requirements_path,
             dry_run=dry_run,
         )
 
