@@ -222,13 +222,35 @@ def _checkout_ref(
     return 0, f"🔒 Checked out ref '{ref}' for repository '{repo_name}'."
 
 
-def git_clone_item(
+def _validated_repo_path(
+    command_path: Path, repo_name: str, output_root: Optional[Path]
+) -> Path:
+    """Reject catalogue paths or symlinks escaping the trusted output root."""
+    if (
+        not repo_name
+        or repo_name in (".", "..")
+        or any(separator in repo_name for separator in ("/", "\\", "\0"))
+    ):
+        raise ValueError("Invalid repository directory name.")
+
+    repo_path = command_path / repo_name
+    root = Path(output_root if output_root is not None else command_path).resolve()
+    target = repo_path.resolve()
+    if target == root or not target.is_relative_to(root) or repo_path.is_symlink():
+        raise ValueError(
+            "Repository path must remain inside the deployment output directory."
+        )
+    return repo_path
+
+
+def git_clone_item(  # noqa: CFQ002
     source: str,
     repo_name: str,
     command_path: str,
     dry_run: bool = False,
     force: bool = False,
     ref: Optional[str] = None,
+    output_root: Optional[Path] = None,
 ) -> Tuple[int, str]:
     """Git clone item and checkout the requested ref.
 
@@ -241,6 +263,7 @@ def git_clone_item(
         When provided, the repository is always brought to this ref, even
         when the clone itself is skipped because it already exists, so that
         different users deploying the same item version run the same code.
+    :param output_root: Trusted deployment output root; defaults to command_path.
     :returns: Tuple of (return code, message).
     """
     ########################################################################
@@ -257,10 +280,12 @@ def git_clone_item(
     # Define the directory path for outputs
     dir_path = Path(command_path)
 
-    # Create the directory if it doesn't exist
-    dir_path.mkdir(parents=True, exist_ok=True)
+    try:
+        repo_path = _validated_repo_path(dir_path, repo_name, output_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return 1, f"Invalid repository deployment path: {exc}"
 
-    repo_path = Path(f"{command_path}/{repo_name}")
+    dir_path.mkdir(parents=True, exist_ok=True)
 
     if force and repo_path.exists():
         # Delete the folder and all its contents

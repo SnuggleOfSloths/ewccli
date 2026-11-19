@@ -205,3 +205,45 @@ def test_dry_run_skips_everything(local_repo, tmp_path):
     assert rc == 0
     assert "Dry run" in msg
     assert not (out / "itemrepo").exists()
+
+@pytest.mark.parametrize("repo_name", ["", ".", "..", "../victim", "/victim", "a/b", "a\\b"])
+def test_invalid_repo_name_has_no_side_effects(tmp_path, monkeypatch, repo_name):
+    out = tmp_path / "out"
+    monkeypatch.setattr(
+        hub_backends, "_clone_repository", lambda **kwargs: pytest.fail("clone called")
+    )
+    rc, _ = git_clone_item("unused", repo_name, str(out), force=True)
+    assert rc != 0
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("escape", ["traversal", "parent_symlink", "repo_symlink", "root"])
+def test_force_rejects_output_escape(tmp_path, monkeypatch, escape):
+    root = tmp_path / "outputs"
+    root.mkdir()
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    marker = victim / "keep.txt"
+    marker.write_text("unrelated data")
+    command_path = root / "item-1"
+    repo_name = "victim"
+    if escape == "traversal":
+        command_path = root / "item-1" / ".." / ".."
+    elif escape == "parent_symlink":
+        command_path.symlink_to(tmp_path, target_is_directory=True)
+    elif escape == "repo_symlink":
+        command_path.mkdir()
+        (command_path / repo_name).symlink_to(victim, target_is_directory=True)
+    else:
+        command_path = root.parent
+        repo_name = root.name
+    monkeypatch.setattr(
+        hub_backends, "check_github_repo_accessible",
+        lambda source: pytest.fail("network check called"),
+    )
+    rc, _ = git_clone_item(
+        "unused", repo_name, str(command_path), force=True, output_root=root
+    )
+    assert rc != 0
+    assert marker.read_text() == "unrelated data"
+    assert root.is_dir()

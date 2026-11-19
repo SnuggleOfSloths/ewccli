@@ -12,6 +12,7 @@ import os
 import sys
 import yaml
 import typing
+from urllib.parse import quote
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 import rich_click as click
@@ -563,10 +564,10 @@ def deploy_cmd(  # noqa: CFQ002, CFQ001, CCR001, C901
         #############################################################################
         # Git clone item to be deployed (public repository available in the internet)
         #############################################################################
-        # Define path for ~/.ewccli where everything is stored
-        # random_id = generate_random_id()
-        # cwd_command = f"{ewc_hub_config.EWC_CLI_DEFAULT_PATH_OUTPUTS}/{item}-{random_id}"
-        command_path = f"{ewc_hub_config.EWC_CLI_DEFAULT_PATH_OUTPUTS}/{item}-{version}"
+        # Encode catalogue values as one cache directory component while
+        # preserving the original version for Git refs (which may contain /).
+        cache_name = f"{quote(str(item), safe='')}-{quote(str(version), safe='')}"
+        command_path = str(ewc_hub_config.EWC_CLI_DEFAULT_PATH_OUTPUTS / cache_name)
         repo_name = os.path.splitext(source.split("/")[-1])[0]
         working_directory_path = f"{command_path}/{repo_name}"
 
@@ -577,6 +578,7 @@ def deploy_cmd(  # noqa: CFQ002, CFQ001, CCR001, C901
             dry_run=dry_run,
             force=force,
             ref=version,
+            output_root=ewc_hub_config.EWC_CLI_DEFAULT_PATH_OUTPUTS,
         )
 
         if git_clone_return_code == 0:
