@@ -545,6 +545,7 @@ def _delete_server_on_openstack(
     openstack_api: connection.Connection,
     server_name: str,
     opts: ServerDeleteOptions,
+    server_info: Dict[str, Any],
 ) -> None:
     """Delete the server and log the backend result."""
     try:
@@ -553,6 +554,7 @@ def _delete_server_on_openstack(
             server_name=server_name,
             force=opts.force,
             dry_run=opts.dry_run,
+            server_info=server_info,
         )
     except Exception as e:
         raise ClickException(
@@ -623,6 +625,13 @@ def delete_cmd(
         )
         return
 
+    if (server_info.get("metadata") or {}).get("deployed") != "ewccli" and not opts.force:
+        _LOGGER.warning(
+            "The VM was not created with ewccli therefore is not deleted automatically with this command."
+            " Use --force if you want to delete it anyway."
+        )
+        return
+
     # Step 3: Run pre-delete steps
     _run_pre_delete_steps(
         openstack_backend=ctx.openstack_backend,
@@ -639,6 +648,7 @@ def delete_cmd(
         openstack_api=openstack_api,
         server_name=server_name,
         opts=opts,
+        server_info=server_info,
     )
 
 

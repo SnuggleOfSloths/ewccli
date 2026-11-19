@@ -13,6 +13,7 @@ from unittest.mock import patch, MagicMock
 
 from ewccli.ewccli import cli
 from ewccli.enums import Federee, Region
+from openstack.compute.v2.server import Server
 
 
 class MockProfile:
@@ -53,6 +54,9 @@ def mock_profile_loader(monkeypatch):
 @pytest.fixture
 def mock_openstack_connect():
     with patch("ewccli.commands.infra_command.OpenstackBackend.connect") as mock:
+        mock.return_value.get_server.return_value = Server(
+            id="server-id", name="my-server", metadata={"deployed": "ewccli"}
+        )
         yield mock
 
 
@@ -151,6 +155,10 @@ def test_delete_success(
     mock_delete_server.assert_called_once()
     del_kwargs = mock_delete_server.call_args.kwargs
     assert del_kwargs["server_name"] == "my-server"
+    assert del_kwargs["server_info"] is pre_kwargs["server_info"]
+    mock_openstack_connect.return_value.get_server.assert_called_once_with(
+        name_or_id="my-server"
+    )
     assert del_kwargs["force"] is False
     assert del_kwargs["dry_run"] is False
 
@@ -183,3 +191,34 @@ def test_delete_env_var_server_name(
     get_kwargs = mock_openstack_connect.return_value.get_server.call_args.kwargs
     assert get_kwargs["name_or_id"] == "other-server"
     assert mock_delete_server.call_args.kwargs["server_name"] == "other-server"
+
+@pytest.mark.parametrize("metadata", [None, {}, {"deployed": "other"}, {"deployed": ""}])
+def test_delete_unmanaged_server_keeps_all_resources(
+    runner, mock_openstack_connect, mock_pre_delete, mock_delete_server, metadata
+):
+    mock_openstack_connect.return_value.get_server.return_value = Server(
+        id="server-id", name="my-server", metadata=metadata
+    )
+
+    result = runner.invoke(cli, ["infra", "delete", "my-server"])
+
+    assert result.exit_code == 0, result.output
+    mock_pre_delete.assert_not_called()
+    mock_delete_server.assert_not_called()
+    mock_openstack_connect.return_value.network.update_ip.assert_not_called()
+    mock_openstack_connect.return_value.network.delete_ip.assert_not_called()
+    mock_openstack_connect.return_value.block_storage.delete_volume.assert_not_called()
+
+
+def test_delete_force_allows_unmanaged_cleanup(
+    runner, mock_openstack_connect, mock_pre_delete, mock_delete_server
+):
+    mock_openstack_connect.return_value.get_server.return_value = Server(
+        id="server-id", name="my-server", metadata={}
+    )
+
+    result = runner.invoke(cli, ["infra", "delete", "my-server", "--force"])
+
+    assert result.exit_code == 0, result.output
+    mock_pre_delete.assert_called_once()
+    assert mock_delete_server.call_args.kwargs["force"] is True

@@ -1072,11 +1072,13 @@ class OpenstackBackend:
         force: bool = False,
         wait_time_s: int = 600,
         dry_run: bool = False,
+        server_info: Optional[Server] = None,
     ) -> Tuple[ServerResult, str]:
         """Delete an OpenStack server.
 
         :param conn: The OpenStack connection
         :param server_name: The server name
+        :param server_info: Previously resolved server, reused for cleanup and deletion.
         :param force: if enabled, also machine not created with the CLI will be deleted.
         :param wait_time_s: The maximum period to wait (for creation or deletion).
         :returns: False on failure
@@ -1094,7 +1096,8 @@ class OpenstackBackend:
         _LOGGER.info(f"Deleting... ({server_name})")
 
         # Verify if the server exists
-        server_info = conn.get_server(name_or_id=server_name)
+        if server_info is None:
+            server_info = conn.get_server(name_or_id=server_name)
 
         if not server_info:
             return (
@@ -1102,7 +1105,7 @@ class OpenstackBackend:
                 f"{server_name} VM doesn't exist on Openstack! No VM to delete.",
             )
 
-        if not server_info.metadata.get("deployed") and not force:
+        if (server_info.metadata or {}).get("deployed") != "ewccli" and not force:
             return (
                 ServerResult(True, False, 0),
                 "The VM was not created with ewccli therefore is not deleted automatically with this command."
