@@ -353,3 +353,27 @@ def test_validate_item_rejects_compatible_but_not_deployable():
         _validate_item(ctx, None, "item")
 
     assert "not deployable" in str(exc.value)
+
+
+@pytest.mark.parametrize("version", ["1.0.0", "release/v1", "x/../../victim", "..\\victim"])
+def test_deploy_encodes_cache_component(runner, tmp_path, monkeypatch, version):
+    import yaml
+
+    catalog = ewc_hub_config.EWC_CLI_HUB_ITEMS_PATH
+    data = yaml.safe_load(catalog.read_text())
+    data["spec"]["items"]["ssh-bastion-flavour"]["version"] = version
+    catalog.write_text(yaml.safe_dump(data))
+    root = tmp_path / "outputs"
+    monkeypatch.setattr(ewc_hub_config, "EWC_CLI_DEFAULT_PATH_OUTPUTS", root)
+    with patch("ewccli.commands.hub.hub_command.git_clone_item") as clone:
+        clone.return_value = (1, "stop before deployment")
+        runner.invoke(cli, ["hub", "deploy", "ssh-bastion-flavour", "--force"])
+    kwargs = clone.call_args.kwargs
+    cache = Path(kwargs["command_path"])
+    assert cache.parent == root
+    assert "\\" not in cache.name
+    assert kwargs["ref"] == version
+    assert kwargs["output_root"] == root
+    assert kwargs["force"] is True
+    if version == "1.0.0":
+        assert cache.name == "ssh-bastion-flavour-1.0.0"
