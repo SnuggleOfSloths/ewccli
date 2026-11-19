@@ -53,6 +53,9 @@ def mock_profile_loader(monkeypatch):
 @pytest.fixture
 def mock_openstack_connect():
     with patch("ewccli.commands.infra_command.OpenstackBackend.connect") as mock:
+        mock.return_value.get_server.return_value = {
+            "id": "server-123", "metadata": {"deployed": "ewccli"}
+        }
         yield mock
 
 
@@ -183,3 +186,34 @@ def test_delete_env_var_server_name(
     get_kwargs = mock_openstack_connect.return_value.get_server.call_args.kwargs
     assert get_kwargs["name_or_id"] == "other-server"
     assert mock_delete_server.call_args.kwargs["server_name"] == "other-server"
+
+@pytest.mark.parametrize("metadata", [{}, None, {"deployed": ""}, {"deployed": "other-tool"}])
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("use_env", [False, True])
+def test_delete_provenance_before_cleanup(
+    runner,
+    mock_openstack_connect,
+    mock_pre_delete,
+    mock_delete_server,
+    metadata,
+    force,
+    use_env,
+):
+    mock_openstack_connect.return_value.get_server.return_value = {
+        "id": "foreign-server", "metadata": metadata,
+    }
+    args = ["infra", "delete", "my-server"]
+    if force:
+        args.append("--force")
+    env = {"EWC_CLI_OS_SERVER_NAME": "foreign-server"} if use_env else {}
+
+    result = runner.invoke(cli, args, env=env)
+
+    assert result.exit_code == 0, result.output
+    if force:
+        mock_pre_delete.assert_called_once()
+        mock_delete_server.assert_called_once()
+        assert mock_delete_server.call_args.kwargs["force"] is True
+    else:
+        mock_pre_delete.assert_not_called()
+        mock_delete_server.assert_not_called()

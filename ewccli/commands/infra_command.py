@@ -623,6 +623,15 @@ def delete_cmd(
         )
         return
 
+    if (server_info.get("metadata") or {}).get(
+        "deployed"
+    ) != "ewccli" and not opts.force:
+        _LOGGER.warning(
+            "The VM was not created with ewccli therefore is not deleted automatically with this command."
+            " Use --force if you want to delete it anyway."
+        )
+        return
+
     # Step 3: Run pre-delete steps
     _run_pre_delete_steps(
         openstack_backend=ctx.openstack_backend,

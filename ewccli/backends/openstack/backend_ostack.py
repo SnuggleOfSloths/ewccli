@@ -1102,7 +1102,7 @@ class OpenstackBackend:
                 f"{server_name} VM doesn't exist on Openstack! No VM to delete.",
             )
 
-        if not server_info.metadata.get("deployed") and not force:
+        if (server_info.metadata or {}).get("deployed") != "ewccli" and not force:
             return (
                 ServerResult(True, False, 0),
                 "The VM was not created with ewccli therefore is not deleted automatically with this command."

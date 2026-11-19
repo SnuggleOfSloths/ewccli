@@ -408,3 +408,28 @@ def test_ssh_key_comment_ignored(tmp_path, backend):
     )
 
     assert result is True
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [{}, None, {"deployed": ""}, {"deployed": "other-tool"},
+     {"deployed": "EWCCLI"}, {"deployed": "ewccli"}],
+)
+@pytest.mark.parametrize("force", [False, True])
+def test_delete_server_requires_provenance(backend, monkeypatch, metadata, force):
+    monkeypatch.setattr("ewccli.backends.openstack.backend_ostack.time.sleep", lambda *_: None)
+    conn = MagicMock()
+    server = SimpleNamespace(metadata=metadata)
+    conn.get_server.return_value = server
+
+    result, message = backend.delete_server(conn, "server-123", force=force)
+
+    allowed = force or (metadata or {}).get("deployed") == "ewccli"
+    assert result.success is True
+    assert result.changed is allowed
+    conn.get_server.assert_called_once_with(name_or_id="server-123")
+    if allowed:
+        conn.compute.delete_server.assert_called_once_with(server)
+    else:
+        conn.compute.delete_server.assert_not_called()
+        assert "--force" in message
